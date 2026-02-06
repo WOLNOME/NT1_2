@@ -34,12 +34,12 @@ const char kWindowTitle[] = "LE3B_04_ウシオ_ユウキ";
 // 設定
 namespace Config {
 	// Supabase Realtime WebSocket の URLプロジェクト固有のエンドポイント
-	const std::string kSupabaseUrl = "wss://oolchvtzizhmniggcaiw.supabase.co/realtime/v1/websocket"
-		"?apikey=sb_publishable_kcL7fFe5hC-ruqdcW0Yjdg_lsRXWu3J&vsn=1.0.0";
+	const std::string kSupabaseUrl = "wss://yajakiioplnfztytplqx.supabase.co/realtime/v1/websocket"
+		"?apikey=sb_publishable_ao7aqaPwFEDfsx2uwog3yw_CTaEzpoP&vsn=1.0.0";
 	// Phoenix チャンネルのトピック
 	const std::string kTopic = "realtime:public:messages";
 	// 認証トークン（ここでは publishable key を使用）実運用では認証済みトークン
-	const std::string kUserToken = "sb_publishable_kcL7fFe5hC-ruqdcW0Yjdg_lsRXWu3J";
+	const std::string kUserToken = "sb_publishable_ao7aqaPwFEDfsx2uwog3yw_CTaEzpoP";
 	// ハートビート間隔（フレーム数）60fps 想定で約3秒
 	const int32_t kHeartbeatIntervalFrames = 180;
 } // namespace Config
@@ -293,6 +293,7 @@ public:
 		std::string lastError;                  // 最後のエラー
 		int32_t lastHeartbeatSentFrame = 0;     // 最後に送信したフレーム番号
 		int32_t lastHeartbeatReceivedFrame = 0; // 最後に受信したフレーム番号
+		double lastRoundTripTimeMs = 0.0;        // 最後の RTT (ミリ秒)
 	};
 
 	// 状態更新はロックで保護
@@ -319,11 +320,21 @@ public:
 	void RecordHeartbeatSent(int32_t frame) {
 		std::lock_guard<std::mutex> lock(mutex_);
 		lastHeartbeatSentFrame_ = frame;
+		//送信時刻を保存
+		lastHeartbeatSentTime_ = std::chrono::high_resolution_clock::now();
 	}
 
 	void RecordHeartbeatReceived(int32_t frame) {
 		std::lock_guard<std::mutex> lock(mutex_);
 		lastHeartbeatReceivedFrame_ = frame;
+		//送信時刻を取得
+		auto receiveTime = std::chrono::high_resolution_clock::now();
+		if (lastHeartbeatSentFrame_ > 0) {
+			//経過時間をマイクロ秒に変換
+			auto duration = std::chrono::duration_cast<std::chrono::microseconds>(receiveTime - lastHeartbeatSentTime_);
+			//ミリ秒を小数で表せるように変換
+			lastRoundTripTimeMs_ = duration.count() / 1000.0;
+		}
 	}
 
 	// スナップショット取得コピー返却
@@ -335,6 +346,7 @@ public:
 		snapshot.lastError = lastError_;
 		snapshot.lastHeartbeatSentFrame = lastHeartbeatSentFrame_;
 		snapshot.lastHeartbeatReceivedFrame = lastHeartbeatReceivedFrame_;
+		snapshot.lastRoundTripTimeMs = lastRoundTripTimeMs_;
 		return snapshot;
 	}
 
@@ -345,6 +357,9 @@ private:
 	std::string lastError_;
 	int32_t lastHeartbeatSentFrame_ = 0;
 	int32_t lastHeartbeatReceivedFrame_ = 0;
+
+	std::chrono::high_resolution_clock::time_point lastHeartbeatSentTime_;	//最後に送信した時刻
+	double lastRoundTripTimeMs_ = 0.0;	//RTT ミリ秒
 };
 
 // JSON パースヘルパ
@@ -533,6 +548,7 @@ namespace UI {
 		ImGui::Text("Last Sent Frame: %d", snapshot.lastHeartbeatSentFrame);
 		ImGui::Text("Last Recv Frame: %d", snapshot.lastHeartbeatReceivedFrame);
 		ImGui::Text("Current Frame: %d", currentFrame);
+		ImGui::Text("RTT: %.2f ms", snapshot.lastRoundTripTimeMs);
 		ImGui::Unindent();
 	}
 
